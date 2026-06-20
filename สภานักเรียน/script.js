@@ -1,4 +1,40 @@
-// ตัวแปรควบคุมระบบหน้าหลักและการเปลี่ยนสลับหน้า
+// ================= ตั้งค่าระบบ Firebase & LINE (กรอกข้อมูลของคุณที่นี่) =================
+const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+    databaseURL: "https://anonymous-9d2e4-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID"
+};
+
+// เริ่มต้นระบบ Firebase (จะทำงานเมื่อมีการใส่ Config ที่ถูกต้อง)
+if (firebaseConfig.apiKey !== "YOUR_API_KEY") {
+    firebase.initializeApp(firebaseConfig);
+}
+
+// ฟังก์ชันส่งแจ้งเตือนเข้า LINE Notify ผ่าน Webhook (เช่น Make.com, Zapier หรือ Backend ของคุณ)
+function sendLineNotification(roleName, roomId) {
+    const message = `📢 มีผู้ใช้งานกดเลือก: [${roleName}] กำลังรอสายในระบบ! คุณสามารถกดเข้าเชื่อมต่อห้องแชทได้ที่นี่: ${window.location.origin}/?room=${roomId}`;
+    
+    // เปลี่ยน YOUR_WEBHOOK_URL เป็น URL Webhook จริงของคุณ
+    fetch("YOUR_WEBHOOK_URL", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: message })
+    }).catch(err => console.log("Line Notification Error:", err));
+}
+
+// ================= ตัวแปรและระบบควบคุมหน้าหลัก =================
+let queueInterval = null;
+let breathingInterval = null;
+let mascotQuoteInterval = null;
+let countdownSeconds = 45;
+let currentRole = "";
+let currentRoomId = null;
+let toggleUserFlag = true;
+
 function switchView(viewId) {
     const sections = document.querySelectorAll('.view-section');
     sections.forEach(section => {
@@ -45,28 +81,43 @@ const mascotQuotes = [
     "ภูมิใจในตัวคุณที่สุดเลยที่ผ่านวันนี้มาได้ สู้ๆ นะ 💕"
 ];
 
-// ================= ระบบจัดการเวลาคิวและแอนิเมชันหายใจ =================
-let queueInterval = null;
-let breathingInterval = null;
-let mascotQuoteInterval = null;
-let countdownSeconds = 45;
-let currentRole = "";
+// ================= ระบบจัดการเวลาคิวและแอนิเมชันหายใจ (Real-time ล็อกคิว) =================
 
 function startMatching(roleName) {
     currentRole = roleName;
+    currentRoomId = "room_" + Math.floor(Math.random() * 100000);
+
+    // แสดงหน้าจอน้อนก้อนเมฆฝึกหายใจและตั้งค่าเริ่มต้นก่อน
     document.getElementById('role-selection').style.display = 'none';
     document.getElementById('role-instruction').innerText = `คุณกำลังรอในฐานะ: ${roleName}`;
     document.getElementById('breathing-companion').style.display = 'flex';
-    
     document.getElementById('cloud-mascot-container').innerHTML = cloudSVG.inhale;
 
     initQueueTimer();
     initBreathingGuide();
+
+    // บันทึกข้อมูลห้องลง Firebase และยิงแจ้งเตือนเข้า LINE (ถ้าต่อ Firebase แล้ว)
+    if (typeof firebase !== 'undefined' && firebaseConfig.apiKey !== "YOUR_API_KEY") {
+        firebase.database().ref('global_queue/' + currentRoomId).set({
+            status: "waiting",
+            role: roleName,
+            createdAt: firebase.database.ServerValue.TIMESTAMP
+        }).then(() => {
+            sendLineNotification(roleName, currentRoomId);
+            listenForPartner(currentRoomId);
+        });
+    }
 }
 
 function cancelMatching() {
     clearInterval(queueInterval);
     clearInterval(breathingInterval);
+    
+    // ลบข้อมูลห้องในคิวออกเมื่อกดยกเลิก
+    if (currentRoomId && typeof firebase !== 'undefined' && firebaseConfig.apiKey !== "YOUR_API_KEY") {
+        firebase.database().ref('global_queue/' + currentRoomId).remove();
+        firebase.database().ref('global_queue/' + currentRoomId).off();
+    }
     
     document.getElementById('cloud-mascot-container').innerHTML = "";
     document.getElementById('role-selection').style.display = 'flex';
@@ -83,9 +134,9 @@ function initQueueTimer() {
     queueInterval = setInterval(() => {
         countdownSeconds--;
         if (countdownSeconds <= 0) {
-            clearInterval(queueInterval); // หยุดนับถอยหลังเมื่อครบกำหนด
+            clearInterval(queueInterval); // หยุดนับเมื่อครบ 45 วินาที
             
-            // เปลี่ยนข้อความแจ้งเตือนเพื่อให้รู้ว่าระบบกำลังพยายามค้นหาต่อไป (ไม่เด้งเข้าห้องแชทจำลองแล้ว)
+            // ปรับแก้ตามบรีฟ: ค้างหน้านี้ไว้และแสดงสถานะค้นหาต่อไปเรื่อยๆ ไม่เด้งเข้าแชทอัตโนมัติเองแล้ว
             document.getElementById('queue-timer').innerText = "กำลังค้นหาคู่สนทนาที่เหมาะสมให้นานกว่าปกติ...";
             document.getElementById('breathing-text').innerText = "ใจเย็นๆ นะ น้อนก้อนเมฆยังอยู่เป็นเพื่อนคุณ ☁️";
         } else {
@@ -103,7 +154,6 @@ function initBreathingGuide() {
     let isInhaling = true;
     
     breathingInterval = setInterval(() => {
-        // เช็คเงื่อนไข: หากเวลานับถอยหลังหมดแล้ว ให้ข้อความแอนิเมชันหายใจยังคงทำงานต่อตามปกติ ไม่โดนเปลี่ยน
         isInhaling = !isInhaling;
         if (countdownSeconds > 0) {
             if (isInhaling) {
@@ -114,7 +164,7 @@ function initBreathingGuide() {
                 container.innerHTML = cloudSVG.exhale;
             }
         } else {
-            // ถ้านับถอยหลังจบแล้ว (แต่อยากให้มินิเกมลูปไปเรื่อยๆ) ก็เปลี่ยนแค่ท่าทางของ SVG น้อนก้อนเมฆตามจังหวะ
+            // เมื่อเวลาคิวหมดแล้ว แต่น้องก้อนเมฆยังคงสลับท่าทางหายใจเข้าออกวนลูปต่อไปเรื่อยๆ
             if (isInhaling) {
                 container.innerHTML = cloudSVG.inhale;
             } else {
@@ -124,16 +174,31 @@ function initBreathingGuide() {
     }, 4000);
 }
 
+// ฟังก์ชันเปิดการรับฟัง Firebase ว่ามีสภาท่านไหนกดลิงก์จากไลน์เข้ามาคุยด้วยหรือยัง
+function listenForPartner(roomId) {
+    firebase.database().ref('global_queue/' + roomId).on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (data && data.status === "connected") {
+            clearInterval(queueInterval);
+            clearInterval(breathingInterval);
+            firebase.database().ref('global_queue/' + roomId).off(); 
+            enterChatRoom(roomId);
+        }
+    });
+}
+
 // ================= ระบบจัดการห้องแชทสดสนทนาเสมือนจริง =================
 
-function enterChatRoom() {
+function enterChatRoom(roomId) {
     switchView('chat-page');
     
     const chatMascot = document.getElementById('chat-mascot-container');
-    chatMascot.innerHTML = cloudSVG.exhale;
+    if (chatMascot) chatMascot.innerHTML = cloudSVG.exhale;
     
     const chatLogs = document.getElementById('chat-logs');
-    chatLogs.innerHTML = `<div class="system-log">เชื่อมต่อกับห้องสนทนาสำเร็จ คุณได้คุยในฐานะ "${currentRole}" แล้วค่ะ</div>`;
+    if (chatLogs) {
+        chatLogs.innerHTML = `<div class="system-log">เชื่อมต่อกับห้องสนทนาสำเร็จ คุณได้คุยในฐานะ "${currentRole}" แล้วค่ะ</div>`;
+    }
     
     document.getElementById('alert-disconnect-box').style.display = "none";
     document.getElementById('status-text').innerText = "คู่สนทนากำลังออนไลน์";
@@ -145,8 +210,6 @@ function enterChatRoom() {
         document.getElementById('mascot-text').innerText = mascotQuotes[randomIndex];
     }, 7000);
 }
-
-let toggleUserFlag = true;
 
 function sendChatMessage() {
     const inputElement = document.getElementById('chat-input-field');
@@ -163,6 +226,7 @@ function sendChatMessage() {
         bubble.innerText = `คนที่ 1: ${messageText}`;
         toggleUserFlag = false;
         
+        // ฟังก์ชันจำลองคู่สนทนาพิมพ์ตอบกลับ (จะทำงานในโหมดทดสอบ/หรือเมื่อยังไม่ได้เชื่อม Database สมบูรณ์)
         setTimeout(() => {
             simulatePartnerReply();
         }, 1500);
@@ -203,6 +267,11 @@ function simulatePartnerReply() {
 function leaveChatRoom() {
     clearInterval(mascotQuoteInterval);
     
+    // ลบห้องออกจากฐานข้อมูลเมื่อคุยเสร็จและกดออกจากห้อง
+    if (currentRoomId && typeof firebase !== 'undefined' && firebaseConfig.apiKey !== "YOUR_API_KEY") {
+        firebase.database().ref('global_queue/' + currentRoomId).remove();
+    }
+    
     document.getElementById('alert-disconnect-box').style.display = "block";
     document.getElementById('status-text').innerText = "คู่สนทนาออฟไลน์แล้ว";
     document.getElementById('status-text').style.color = "#c53030";
@@ -214,3 +283,44 @@ function leaveChatRoom() {
         switchView('home-page');
     }, 1500); 
 }
+
+// ================= ระบบตรวจสอบลิงก์ URL สำหรับ สมาชิกสภา (เข้าล็อกห้องพักสาย) =================
+
+function checkIncomingUrl() {
+    if (typeof firebase === 'undefined' || firebaseConfig.apiKey === "YOUR_API_KEY") return;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomId = urlParams.get('room');
+
+    if (roomId) {
+        currentRoomId = roomId;
+        const roomRef = firebase.database().ref('global_queue/' + roomId);
+
+        roomRef.get().then((snapshot) => {
+            if (snapshot.exists()) {
+                const roomData = snapshot.val();
+                
+                // ตรวจสอบว่ามีสภาคนอื่นกดรับไปก่อนหน้าแล้วหรือยัง
+                if (roomData.status === "waiting") {
+                    // หากยังว่าง ให้สภาท่านแรกล็อกสถานะห้องเป็นติดสายทันที คนถัดไปจะแย่งกดไม่ได้
+                    roomRef.update({
+                        status: "connected"
+                    }).then(() => {
+                        currentRole = "สภานักเรียน/ผู้ให้คำปรึกษา";
+                        enterChatRoom(roomId);
+                    });
+                } else {
+                    // หากห้องถูกล็อกไปแล้วโดยสภาคนอื่น
+                    alert("⚠️ ขออภัยด้วยค่ะ! เคสการปรึกษานี้มีสมาชิกสภาท่านอื่นกดรับฟังสายไปเรียบร้อยแล้ว");
+                    window.location.href = window.location.origin; // ส่งกลับหน้าหลัก
+                }
+            } else {
+                alert("ไม่พบรหัสห้องสนทนานี้ หรือห้องถูกยกเลิกไปแล้ว");
+                window.location.href = window.location.origin;
+            }
+        });
+    }
+}
+
+// เรียกให้ระบบตรวจสอบพารามิเตอร์ลิงก์ห้องจาก URL ทุกครั้งที่เปิดหน้าเว็บขึ้นมาใหม่
+window.addEventListener('DOMContentLoaded', checkIncomingUrl);
