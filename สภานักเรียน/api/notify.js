@@ -1,32 +1,32 @@
 // ไฟล์: api/notify.js
+
 export default async function handler(req, res) {
-    // อนุญาตเฉพาะการส่งข้อมูลแบบ POST
+    // 1. อนุญาตเฉพาะการส่งข้อมูลแบบ POST เท่านั้น
     if (req.method !== 'POST') {
         return res.status(405).send('Method Not Allowed');
     }
 
-    // รับข้อความที่ส่งมาจากหน้าเว็บ
-    const { message } = req.body;
-    
-    // นำ Token ที่คัดลอกมาจากเว็บ LINE Notify มาวางในเครื่องหมายคำพูดด้านล่างนี้
-    const LINE_TOKEN = 'OwQnZfP78CucoDsReSFMOZroVrlwhhyKokJ3hY67OnHYHbKErQ3nzm6hBrjC1J0h4CqAoDN5uMlH0YKlxH1vQrRVikFa2p0lN0V581ENNvNfpPTQ+Gyz9RUYsXHYB6+pR1PJ46PXulbTJU9gf3S21AdB04t89/1O/w1cDnyilFU=';
-
     try {
-        const response = await fetch('https://notify-api.line.me/api/notify', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Authorization': `Bearer ${LINE_TOKEN}`
-            },
-            body: new URLSearchParams({ message: message })
-        });
+        // ดึงข้อมูลที่ LINE ส่งมาตรวจดู (เผื่อเอาไปใช้ซ่อมแซมระบบต่อ)
+        const events = req.body.events;
 
-        if (response.ok) {
-            res.status(200).json({ success: true });
-        } else {
-            res.status(response.status).json({ error: 'Failed to send to LINE' });
+        // 2. จุดสำคัญ: ถ้าเป็นการกดปุ่ม "Verify" จาก LINE Developer 
+        // มักจะส่ง events มาเป็นอาร์เรย์ว่าง ๆ หรือมีเตือนระบบ ให้เราส่ง 200 OK กลับไปทันที
+        if (!events || events.length === 0) {
+            return res.status(200).json({ message: "Webhook verified successfully!" });
         }
+
+        // --- (โค้ดสำหรับจัดการ Logic ส่ง LINE Notify หรือ Firebase ของคุณอยู่ตรงนี้) ---
+        // ตัวอย่างเช่น:
+        // const event = events[0];
+        // if (event.type === 'message') { ... }
+        
+        // 3. เมื่อระบบทำงานฝั่งของคุณเสร็จแล้ว ต้องปิดท้ายด้วยการส่งสถานะ 200 เสมอ
+        return res.status(200).json({ status: 'success' });
+
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error("Webhook Error:", error);
+        // หากโค้ดด้านในบัค ให้ส่งสถานะ 500 พร้อมบอกสาเหตุสั้นๆ จะได้ไม่งงซ่อมยาก
+        return res.status(500).json({ error: error.message });
     }
 }
