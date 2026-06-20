@@ -1,4 +1,4 @@
-// ================= ตั้งค่าระบบ Firebase & LINE (กรอกข้อมูลของคุณที่นี่) =================
+// ================= ตั้งค่าระบบ Firebase (กรอกข้อมูลของคุณที่นี่) =================
 const firebaseConfig = {
     apiKey: "YOUR_API_KEY",
     authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
@@ -10,20 +10,31 @@ const firebaseConfig = {
 };
 
 // เริ่มต้นระบบ Firebase (จะทำงานเมื่อมีการใส่ Config ที่ถูกต้อง)
-if (firebaseConfig.apiKey !== "YOUR_API_KEY") {
+if (typeof firebase !== 'undefined' && firebaseConfig.apiKey !== "YOUR_API_KEY") {
     firebase.initializeApp(firebaseConfig);
 }
 
-// ฟังก์ชันส่งแจ้งเตือนเข้า LINE Notify ผ่าน Webhook (เช่น Make.com, Zapier หรือ Backend ของคุณ)
+// ================= ฟังก์ชันแจ้งเตือนเข้า LINE ผ่านระบบหลังบ้าน Vercel =================
 function sendLineNotification(roleName, roomId) {
     const message = `📢 มีผู้ใช้งานกดเลือก: [${roleName}] กำลังรอสายในระบบ! คุณสามารถกดเข้าเชื่อมต่อห้องแชทได้ที่นี่: ${window.location.origin}/?room=${roomId}`;
     
-    // เปลี่ยน YOUR_WEBHOOK_URL เป็น URL Webhook จริงของคุณ
-    fetch("YOUR_WEBHOOK_URL", {
+    // แทนที่ด้วย LINE Channel Access Token จริงของคุณ (จากเมนู Messaging API บน LINE Developers)
+    const myLineToken = "OwQnZfP78CucoDsReSFMOZroVrlwhhyKokJ3hY67OnHYHbKErQ3nzm6hBrjC1J0h4CqAoDN5uMlH0YKlxH1vQrRVikFa2p0lN0V581ENNvNfpPTQ+Gyz9RUYsXHYB6+pR1PJ46PXulbTJU9gf3S21AdB04t89/1O/w1cDnyilFU="; 
+
+    // ยิงเรียกหาไฟล์ api/notify.js บนเซิร์ฟเวอร์หลังบ้าน Vercel ของเราเอง
+    fetch(`${window.location.origin}/api/notify`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: message })
-    }).catch(err => console.log("Line Notification Error:", err));
+        headers: { 
+            "Content-Type": "application/json" 
+        },
+        body: JSON.stringify({ 
+            message: message,
+            token: myLineToken
+        })
+    })
+    .then(res => res.json())
+    .then(data => console.log("ส่งข้อมูลแจ้งเตือนไปหลังบ้านสำเร็จ:", data))
+    .catch(err => console.log("Line Notification Error:", err));
 }
 
 // ================= ตัวแปรและระบบควบคุมหน้าหลัก =================
@@ -87,7 +98,7 @@ function startMatching(roleName) {
     currentRole = roleName;
     currentRoomId = "room_" + Math.floor(Math.random() * 100000);
 
-    // แสดงหน้าจอน้อนก้อนเมฆฝึกหายใจและตั้งค่าเริ่มต้นก่อน
+    // แสดงหน้าจอน้อนก้อนเมฆฝึกหายใจและตั้งค่าเริ่มต้น
     document.getElementById('role-selection').style.display = 'none';
     document.getElementById('role-instruction').innerText = `คุณกำลังรอในฐานะ: ${roleName}`;
     document.getElementById('breathing-companion').style.display = 'flex';
@@ -96,7 +107,7 @@ function startMatching(roleName) {
     initQueueTimer();
     initBreathingGuide();
 
-    // บันทึกข้อมูลห้องลง Firebase และยิงแจ้งเตือนเข้า LINE (ถ้าต่อ Firebase แล้ว)
+    // บันทึกข้อมูลห้องลง Firebase และยิงแจ้งเตือนเข้า LINE
     if (typeof firebase !== 'undefined' && firebaseConfig.apiKey !== "YOUR_API_KEY") {
         firebase.database().ref('global_queue/' + currentRoomId).set({
             status: "waiting",
@@ -113,7 +124,7 @@ function cancelMatching() {
     clearInterval(queueInterval);
     clearInterval(breathingInterval);
     
-    // ลบข้อมูลห้องในคิวออกเมื่อกดยกเลิก
+    // ลบข้อมูลห้องในคิวออกเมื่อเด็กกดยกเลิกสาย
     if (currentRoomId && typeof firebase !== 'undefined' && firebaseConfig.apiKey !== "YOUR_API_KEY") {
         firebase.database().ref('global_queue/' + currentRoomId).remove();
         firebase.database().ref('global_queue/' + currentRoomId).off();
@@ -136,7 +147,7 @@ function initQueueTimer() {
         if (countdownSeconds <= 0) {
             clearInterval(queueInterval); // หยุดนับเมื่อครบ 45 วินาที
             
-            // ปรับแก้ตามบรีฟ: ค้างหน้านี้ไว้และแสดงสถานะค้นหาต่อไปเรื่อยๆ ไม่เด้งเข้าแชทอัตโนมัติเองแล้ว
+            // ค้างหน้านี้ไว้และแสดงสถานะค้นหาต่อไปเรื่อยๆ ไม่เด้งเข้าห้องแชทจำลองเองแล้ว
             document.getElementById('queue-timer').innerText = "กำลังค้นหาคู่สนทนาที่เหมาะสมให้นานกว่าปกติ...";
             document.getElementById('breathing-text').innerText = "ใจเย็นๆ นะ น้อนก้อนเมฆยังอยู่เป็นเพื่อนคุณ ☁️";
         } else {
@@ -164,7 +175,7 @@ function initBreathingGuide() {
                 container.innerHTML = cloudSVG.exhale;
             }
         } else {
-            // เมื่อเวลาคิวหมดแล้ว แต่น้องก้อนเมฆยังคงสลับท่าทางหายใจเข้าออกวนลูปต่อไปเรื่อยๆ
+            // เมื่อเวลาคิวหมดแล้ว แต่น้องก้อนเมฆยังคงสลับท่าทางหายใจเข้าออกวนลูปต่อไปเรื่อยๆ ให้เด็กๆ นั่งดูผ่อนคลายจิตใจ
             if (isInhaling) {
                 container.innerHTML = cloudSVG.inhale;
             } else {
@@ -187,7 +198,7 @@ function listenForPartner(roomId) {
     });
 }
 
-// ================= ระบบจัดการห้องแชทสดสนทนาเสมือนจริง =================
+// ================= ระบบจัดการห้องแชทสดสนทนาจริง =================
 
 function enterChatRoom(roomId) {
     switchView('chat-page');
@@ -226,7 +237,7 @@ function sendChatMessage() {
         bubble.innerText = `คนที่ 1: ${messageText}`;
         toggleUserFlag = false;
         
-        // ฟังก์ชันจำลองคู่สนทนาพิมพ์ตอบกลับ (จะทำงานในโหมดทดสอบ/หรือเมื่อยังไม่ได้เชื่อม Database สมบูรณ์)
+        // ฟังก์ชันจำลองคู่สนทนาพิมพ์ตอบกลับ (จะทำงานเมื่อยังไม่ได้เชื่อม Database สมบูรณ์ / หรือเปิดเล่นทั่วไป)
         setTimeout(() => {
             simulatePartnerReply();
         }, 1500);
@@ -284,7 +295,7 @@ function leaveChatRoom() {
     }, 1500); 
 }
 
-// ================= ระบบตรวจสอบลิงก์ URL สำหรับ สมาชิกสภา (เข้าล็อกห้องพักสาย) =================
+// ================= ระบบตรวจสอบลิงก์ URL สำหรับ สมาชิกสภา (เข้าล็อกห้องป้องกันการกดซ้ำ) =================
 
 function checkIncomingUrl() {
     if (typeof firebase === 'undefined' || firebaseConfig.apiKey === "YOUR_API_KEY") return;
@@ -300,9 +311,9 @@ function checkIncomingUrl() {
             if (snapshot.exists()) {
                 const roomData = snapshot.val();
                 
-                // ตรวจสอบว่ามีสภาคนอื่นกดรับไปก่อนหน้าแล้วหรือยัง
+                // ตรวจสอบว่าห้องยังว่าง (waiting) และยังไม่มีสภาคนอื่นกดตัดหน้าไปก่อน
                 if (roomData.status === "waiting") {
-                    // หากยังว่าง ให้สภาท่านแรกล็อกสถานะห้องเป็นติดสายทันที คนถัดไปจะแย่งกดไม่ได้
+                    // หากยังว่าง ให้ล็อกสถานะห้องเปลี่ยนเป็นติดสาย (connected) ทันที สภาคนถัดไปที่กดเข้ามาจะถูกปฏิเสธ
                     roomRef.update({
                         status: "connected"
                     }).then(() => {
@@ -310,17 +321,17 @@ function checkIncomingUrl() {
                         enterChatRoom(roomId);
                     });
                 } else {
-                    // หากห้องถูกล็อกไปแล้วโดยสภาคนอื่น
-                    alert("⚠️ ขออภัยด้วยค่ะ! เคสการปรึกษานี้มีสมาชิกสภาท่านอื่นกดรับฟังสายไปเรียบร้อยแล้ว");
-                    window.location.href = window.location.origin; // ส่งกลับหน้าหลัก
+                    // หากห้องถูกล็อกระบบไปแล้วโดยสภาคนแรกที่กดลิงก์เข้ามา
+                    alert("⚠️ ขออภัยด้วยค่ะ! เคสการปรึกษานี้มีสมาชิกสภาท่านอื่นกดรับสายดูแลไปเรียบร้อยแล้ว");
+                    window.location.href = window.location.origin; // เด้งสภากลับหน้าหลักทันที
                 }
             } else {
-                alert("ไม่พบรหัสห้องสนทนานี้ หรือห้องถูกยกเลิกไปแล้ว");
+                alert("ไม่พบรหัสห้องสนทนานี้ หรือห้องปรึกษาถูกยกเลิกไปแล้ว");
                 window.location.href = window.location.origin;
             }
         });
     }
 }
 
-// เรียกให้ระบบตรวจสอบพารามิเตอร์ลิงก์ห้องจาก URL ทุกครั้งที่เปิดหน้าเว็บขึ้นมาใหม่
+// สั่งให้ระบบวิ่งตรวจสอบพารามิเตอร์ลิงก์คิวห้องจาก LINE ทันทีเมื่อเปิดหน้าเว็บ
 window.addEventListener('DOMContentLoaded', checkIncomingUrl);
